@@ -6,14 +6,14 @@ using Unity.VisualScripting;
 using STYLY.Http;
 using STYLY.Http.Service;
 using System.Threading.Tasks;
-using STYLY.Http.Service.Unity; // Required for Http class if not already there
+using STYLY.Http.Service.Unity;
 
 namespace WebrequestVisualScriptingNodes
 {
     [UnitShortTitle("Post Json")]
     [UnitTitle("Post Json")]
     [UnitCategory("Web Request")]
-    [UnitSubtitle("Post JSON string data to a URL")]
+    [UnitSubtitle("Post JSON string data to a URL with optional Bearer token")] // Updated subtitle
     public class PostJson : Unit
     {
         [DoNotSerialize]
@@ -35,6 +35,9 @@ namespace WebrequestVisualScriptingNodes
         public ValueInput JsonData;
 
         [DoNotSerialize]
+        public ValueInput BearerToken; // Added BearerToken
+
+        [DoNotSerialize]
         public ValueOutput result;
 
         [DoNotSerialize]
@@ -53,6 +56,7 @@ namespace WebrequestVisualScriptingNodes
 
             URL = ValueInput<string>("URL", "");
             JsonData = ValueInput<string>("JSON Data", "");
+            BearerToken = ValueInput<string>("Bearer Token", string.Empty); // Initialized BearerToken port
             result = ValueOutput<string>("Response Text", (flow) => resultValue);
             progress = ValueOutput<float>("Progress Value", (flow) => progressValue);
         }
@@ -61,9 +65,10 @@ namespace WebrequestVisualScriptingNodes
         {
             string url = flow.GetValue<string>(URL);
             string jsonData = flow.GetValue<string>(JsonData);
+            string bearerToken = flow.GetValue<string>(BearerToken); // Get BearerToken value
             HttpResponse httpResponse = null;
 
-            UniTask.Create(async () => { httpResponse = await PostJsonTask(url, jsonData); }).Forget();
+            UniTask.Create(async () => { httpResponse = await PostJsonTask(url, jsonData, bearerToken); }).Forget(); // Pass bearerToken
 
             while (httpResponse == null)
             {
@@ -72,7 +77,7 @@ namespace WebrequestVisualScriptingNodes
                     flow.Invoke(outputTrigger_Progress);
                     progressValuePrev = progressValue;
                 }
-                yield return null; // Wait until next frame
+                yield return null;
             }
 
             if (httpResponse.IsSuccessful)
@@ -88,14 +93,19 @@ namespace WebrequestVisualScriptingNodes
             }
         }
 
-        private async UniTask<HttpResponse> PostJsonTask(string url, string jsonData)
+        private async UniTask<HttpResponse> PostJsonTask(string url, string jsonData, string bearerToken) // Added bearerToken parameter
         {
-            // Http.PostJson automatically sets the Content-Type to "application/json"
-            HttpResponse httpResponse = await Http.PostJson(url, jsonData)
+            var request = Http.PostJson(url, jsonData);
+            if (!string.IsNullOrEmpty(bearerToken))
+            {
+                request.SetHeader("Authorization", "Bearer " + bearerToken); // Set Authorization header
+            }
+
+            HttpResponse httpResponse = await request
                 .OnError(response => Debug.Log(response.StatusCode + " " + response.Error))
                 .OnNetworkError(response => Debug.Log("NetworkError: " + response.Error))
                 .OnUploadProgress(progress => progressValue = progress)
-                .OnDownloadProgress(progress => progressValue = progress) // For response download
+                .OnDownloadProgress(progress => progressValue = progress)
                 .SendAsync();
             return httpResponse;
         }

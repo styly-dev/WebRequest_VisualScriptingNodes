@@ -50,15 +50,10 @@ public class PostNodesTests
 
     // Helper to create and run a graph for a specific node type
     // This is a simplified version. Actual graph setup can be complex.
-    private IEnumerator RunNodeTest(System.Type nodeType, ValueInput urlPort, string urlValue, ValueInput dataPort, object dataValue, ValueOutput resultPort, System.Action<object, bool, string> callback)
+    // Modify the RunNodeTest helper method to accept a list of data ports and values
+    // This is a simplified representation. You might need a more robust way to pass multiple dynamic inputs.
+    private IEnumerator RunNodeTest(System.Type nodeType, ValueInput urlPort, string urlValue, System.Collections.Generic.List<ValueInput> dataPorts, System.Collections.Generic.List<object> dataValues, ValueOutput resultPort, System.Action<object, bool, string> callback)
     {
-        // This is a placeholder for how you might set up and run a VS graph in a test.
-        // In a real scenario, you'd create a ScriptGraphAsset, add your node,
-        // connect ports, and then trigger it.
-        // For now, we'll simulate the node's direct behavior as much as possible,
-        // or assume a simplified graph execution.
-
-        // Create an instance of the node
         var node = System.Activator.CreateInstance(nodeType) as Unit;
         if (node == null)
         {
@@ -66,19 +61,15 @@ public class PostNodesTests
             yield break;
         }
 
-        // Simulate setting input values
-        // This is highly simplified. In reality, you'd use flow.SetValue for ValueInputs.
-        // We're directly invoking the 'Enter' coroutine which is an internal part of the node.
-        // This bypasses some of the VS execution logic but can work for unit-level tests.
-
-        // The 'Enter' method in your nodes is a coroutine.
-        // To test it, you need to run it as a coroutine.
-        // Graph flow for setting values (simplified)
         var flow = GraphFakeFlow.New(null);
         flow.SetValue(urlPort, urlValue);
-        if (dataPort != null) // dataPort is null for GET nodes
+
+        if (dataPorts != null && dataValues != null && dataPorts.Count == dataValues.Count)
         {
-            flow.SetValue(dataPort, dataValue);
+            for(int i = 0; i < dataPorts.Count; i++)
+            {
+                flow.SetValue(dataPorts[i], dataValues[i]);
+            }
         }
 
         // Definition needs to be called to initialize ports
@@ -92,19 +83,11 @@ public class PostNodesTests
             yield break;
         }
 
-        // Start the coroutine
         var enumerator = (IEnumerator)enterMethod.Invoke(node, new object[] { flow });
-        float timeout = Time.realtimeSinceStartup + 20f; // 20 seconds timeout
+        float timeout = Time.realtimeSinceStartup + 20f;
 
         bool successTriggered = false;
         bool errorTriggered = false;
-        string errorMessage = "";
-
-        // Hook into output triggers (simplified)
-        // In a real graph, these would be connected to other nodes.
-        // Here, we're just checking if they were invoked.
-        // This part is tricky without a full VS graph execution environment.
-        // We'll rely on the enumerator yielding the correct ControlOutputs.
 
         ControlOutput successOutput = (ControlOutput)node.GetType().GetField("outputTrigger").GetValue(node);
         ControlOutput errorOutput = (ControlOutput)node.GetType().GetField("outputTrigger_Error").GetValue(node);
@@ -119,12 +102,10 @@ public class PostNodesTests
             if (enumerator.Current == successOutput) successTriggered = true;
             if (enumerator.Current == errorOutput) errorTriggered = true;
 
-            // If the coroutine yields a ControlOutput, and we're waiting for it, break or continue
             if (successTriggered || errorTriggered) break;
-            yield return null; // Wait for the next frame
+            yield return null;
         }
 
-        // Wait a frame for async operations inside Enter to potentially complete
         yield return null;
 
         if (successTriggered)
@@ -134,13 +115,28 @@ public class PostNodesTests
         }
         else if (errorTriggered)
         {
-             var errorResult = flow.GetValue(resultPort); // Error message is often put in result for these nodes
+             var errorResult = flow.GetValue(resultPort);
             callback(errorResult, false, "Node triggered error output. Message: " + errorResult);
         }
         else
         {
             callback(null, false, "Node did not trigger success or error output within the coroutine's execution path.");
         }
+    }
+
+    // Overload RunNodeTest for single data port (to keep other tests working without change)
+    private IEnumerator RunNodeTest(System.Type nodeType, ValueInput urlPort, string urlValue, ValueInput dataPort, object dataValue, ValueOutput resultPort, System.Action<object, bool, string> callback)
+    {
+        var dataPortsList = new System.Collections.Generic.List<ValueInput>();
+        var dataValuesList = new System.Collections.Generic.List<object>();
+
+        if (dataPort != null) // dataPort can be null for GET nodes
+        {
+            dataPortsList.Add(dataPort);
+            dataValuesList.Add(dataValue);
+        }
+
+        yield return RunNodeTest(nodeType, urlPort, urlValue, dataPortsList, dataValuesList, resultPort, callback);
     }
 
 
@@ -238,34 +234,72 @@ public class PostNodesTests
         postJsonNode.GetType().GetMethod("Definition", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).Invoke(postJsonNode, null);
 
         string testJson = "{\"name\":\"VisualScriptingTest\", \"value\":123}"; // Escaped JSON
-        bool testComplete = false;
-        string responseText = null;
-        bool success = false;
+        string testBearerToken = "TestToken123";
+        bool testCompleteNoToken = false;
+        string responseTextNoToken = null;
+        bool successNoToken = false;
 
+        bool testCompleteWithToken = false;
+        string responseTextWithToken = null;
+        bool successWithToken = false;
+
+        // --- Test without Bearer Token ---
+        Debug.Log("Testing PostJsonNode without Bearer token.");
         yield return RunNodeTest(
             typeof(PostJson),
             postJsonNode.URL,
             TestServerUrl,
-            postJsonNode.JsonData,
-            testJson,
+            new System.Collections.Generic.List<ValueInput> { postJsonNode.JsonData, postJsonNode.BearerToken }, // Pass list of ValueInputs
+            new System.Collections.Generic.List<object> { testJson, string.Empty }, // Pass list of corresponding values (empty token)
             postJsonNode.result,
             (result, s, errorMsg) =>
             {
-                responseText = result as string;
-                success = s;
-                if (!s) Debug.LogError("Test Error: " + errorMsg);
-                testComplete = true;
+                responseTextNoToken = result as string;
+                successNoToken = s;
+                if (!s) Debug.LogError("Test Error (No Token): " + errorMsg + " Response: " + responseTextNoToken);
+                testCompleteNoToken = true;
             }
         );
 
-        yield return new WaitUntil(() => testComplete);
+        yield return new WaitUntil(() => testCompleteNoToken);
 
-        Assert.IsTrue(success, "PostJson node did not trigger success output.");
-        Assert.IsNotNull(responseText, "Response text should not be null for PostJson.");
-        Debug.Log("PostJson Response: " + responseText);
-        // Postman Echo returns a JSON response that includes the json data sent.
-        // Need to parse the expected JSON from the actual JSON.
-        Assert.IsTrue(responseText.Contains("\"name\":\"VisualScriptingTest\"") && responseText.Contains("\"value\":123"), "Response should contain the sent JSON data.");
+        Assert.IsTrue(successNoToken, "PostJson node (no token) did not trigger success output.");
+        Assert.IsNotNull(responseTextNoToken, "Response text (no token) should not be null for PostJson.");
+        Debug.Log("PostJson Response (No Token): " + responseTextNoToken);
+        Assert.IsTrue(responseTextNoToken.Contains("\"name\":\"VisualScriptingTest\"") && responseTextNoToken.Contains("\"value\":123"), "Response (no token) should contain the sent JSON data.");
+        Assert.IsFalse(responseTextNoToken.Contains("Bearer TestToken123"), "Response (no token) should not contain authorization header.");
+
+
+        // --- Test with Bearer Token ---
+        Debug.Log("Testing PostJsonNode with Bearer token.");
+        // Need to re-initialize or ensure state is clean if RunNodeTest or node instance is reused and has state.
+        // For this test, creating a new node instance or ensuring RunNodeTest is stateless for inputs is safer.
+        // However, our current RunNodeTest re-creates the node instance via Activator.CreateInstance, so it should be fine.
+
+        yield return RunNodeTest(
+            typeof(PostJson),
+            postJsonNode.URL, // URL port
+            TestServerUrl,    // URL value
+            new System.Collections.Generic.List<ValueInput> { postJsonNode.JsonData, postJsonNode.BearerToken }, // List of data ports
+            new System.Collections.Generic.List<object> { testJson, testBearerToken }, // List of data values including the token
+            postJsonNode.result, // Result port
+            (result, s, errorMsg) =>
+            {
+                responseTextWithToken = result as string;
+                successWithToken = s;
+                if (!s) Debug.LogError("Test Error (With Token): " + errorMsg + " Response: " + responseTextWithToken);
+                testCompleteWithToken = true;
+            }
+        );
+
+        yield return new WaitUntil(() => testCompleteWithToken);
+
+        Assert.IsTrue(successWithToken, "PostJson node (with token) did not trigger success output.");
+        Assert.IsNotNull(responseTextWithToken, "Response text (with token) should not be null for PostJson.");
+        Debug.Log("PostJson Response (With Token): " + responseTextWithToken);
+        // Postman Echo returns the headers in the response. Check if the Authorization header is present.
+        Assert.IsTrue(responseTextWithToken.Contains("\"authorization\":\"Bearer TestToken123\""), "Response (with token) should contain the Authorization header with the Bearer token.");
+        Assert.IsTrue(responseTextWithToken.Contains("\"name\":\"VisualScriptingTest\"") && responseTextWithToken.Contains("\"value\":123"), "Response (with token) should also contain the sent JSON data.");
     }
 }
 
