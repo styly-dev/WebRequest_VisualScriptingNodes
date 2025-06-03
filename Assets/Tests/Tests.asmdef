@@ -4,9 +4,13 @@
     "references": [
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
-        "com.styly.webrequest-visualscripting-nodes"
+        "com.styly.webrequest-visualscripting-nodes",
+        "Unity.VisualScripting.Core",
+        "Unity.VisualScripting.Flow"
     ],
-    "includePlatforms": [],
+    "includePlatforms": [
+        "Editor"
+    ],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": true,
